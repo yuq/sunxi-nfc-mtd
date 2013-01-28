@@ -1,0 +1,14 @@
+GPATH
+GRTAGS
+GSYMS
+GTAGS
+
+*~
+
+*.o
+*.cmd
+*.mod.c
+Module.symvers
+modules.order
+.tmp_versions
+*.ko
