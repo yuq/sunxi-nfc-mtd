@@ -1,24 +1,77 @@
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/kernel.h>
+#include <linux/slab.h>
 #include <linux/platform_device.h>
+#include <linux/mtd/mtd.h>
+#include <linux/mtd/nand.h>
 #include <plat/sys_config.h>
 
 #include "defs.h"
 #include "nfc.h"
 
+MODULE_LICENSE("GPL");
+
 #define	DRIVER_NAME	"mtd-nand-sunxi"
 
-MODULE_LICENSE("GPL");
+struct sunxi_nand_info {
+	struct mtd_info mtd;
+	struct nand_chip nand;
+};
 
 static int __devinit nand_probe(struct platform_device *pdev)
 {
-	//nfc_init();
+	int err;
+	struct sunxi_nand_info *info;
+
+	if ((info = kzalloc(sizeof(*info), GFP_KERNEL)) == NULL) {
+		ERR_INFO("alloc nand info fail\n");
+		err = -ENOMEM;
+		goto out;
+	}
+
+	info->mtd.priv = &info->nand;
+	info->mtd.name = dev_name(&pdev->dev);
+	info->mtd.owner = THIS_MODULE;
+
+	if ((err = nfc_init(&info->mtd)) < 0) {
+		ERR_INFO("nfc inti fail\n");
+		goto out_free_info;
+	}
+
+	// first scan to find the device and get the page size
+	if ((err = nand_scan_ident(mtd, 1, NULL)) < 0) {
+		ERR_INFO("nand scan ident fail\n");
+		goto out_nfc_exit;
+	}
+
+	// init NFC with flash chip info got from first scan
+	nfc_chip_init(&info->mtd);
+
+	// second phase scan
+	if ((err = nand_scan_tail(mtd)) < 0) {
+		ERR_INFO("nand scan tail fail\n");
+		goto err_nfc_exit;
+	}
+
+	platform_set_drvdata(pdev, info);
 	return 0;
+
+ out_nfc_exit:
+	nfc_exit(&info->mtd);
+ out_free_info:
+	kfree(info);
+ out:
+	return err;
 }
 
 static int __devexit nand_remove(struct platform_device *pdev)
 {
+	struct sunxi_nand_info *info = platform_get_drvdata(pdev);
+
+	platform_set_drvdata(pdev, NULL);
+	nand_release(&info->mtd);
+	nfc_exit(&info->mtd);
+	kfree(info);
 	return 0;
 }
 
@@ -37,7 +90,7 @@ static int nand_resume(struct platform_device *pdev)
 	return 0;
 }
 
-static struct platform_driver nand_driver = {
+static struct platform_driver plat_drv = {
 	.probe		= nand_probe,
 	.remove		= nand_remove,
 	.shutdown   = nand_shutdown,
@@ -47,6 +100,11 @@ static struct platform_driver nand_driver = {
 		.name	= DRIVER_NAME,
 		.owner	= THIS_MODULE,
 	},
+};
+
+static struct platform_device plat_dev = {
+	.name = DRIVER_NAME,
+	.id = 0,
 };
 
 static int __init nand_init(void)
@@ -64,13 +122,19 @@ static int __init nand_init(void)
 
 	DBG_INFO("nand driver, init.\n");
 
-	if ((err = platform_driver_register(&nand_driver)) != 0) {
+	if ((err = platform_driver_register(&plat_drv)) != 0) {
 		ERR_INFO("platform_driver_register fail \n");
 		return err;
 	}
 	DBG_INFO("nand driver, ok.\n");
 
-	nfc_init();
+	// add an NFC, may be should be done by platform driver
+	if ((err = platform_device_register(&plat_dev)) < 0) {
+		ERR_INFO("platform_device_register fail\n");
+		return err;
+	}
+	DBG_INFO("nand device, ok.\n");
+
 	return 0;
 }
 
@@ -86,8 +150,11 @@ static void __exit nand_exit(void)
         return;
     }
 
+	DBG_INFO("nand device : bye bye\n");
+	platform_device_unregister(&plat_dev);
+
 	DBG_INFO("nand driver : bye bye\n");
-	platform_driver_unregister(&nand_driver);
+	platform_driver_unregister(&plat_drv);
 }
 
 module_init(nand_init);

@@ -5,6 +5,8 @@
 
 #ifdef __LINUX__
 
+#include <linux/kernel.h>
+
 #define DBG_INFO(fmt, ...) printk(KERN_INFO PREFIX fmt, ##__VA_ARGS__)
 #define ERR_INFO(fmt, ...) printk(KERN_ERR PREFIX fmt, ##__VA_ARGS__)
 
@@ -14,6 +16,5 @@
 #define ERR_INFO(fmt, ...)
 
 #endif
-
 
 #endif

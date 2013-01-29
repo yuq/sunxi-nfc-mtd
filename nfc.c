@@ -1,14 +1,15 @@
-#include "defs.h"
-#include "regs.h"
-
 #ifdef __LINUX__
-#include <linux/kernel.h>
 #include <linux/io.h>
 #include <linux/string.h>
+#include <linux/mtd/mtd.h>
+#include <linux/mtd/nand.h>
 #include <plat/sys_config.h>
 #else
 
 #endif
+
+#include "defs.h"
+#include "regs.h"
 
 //////////////////////////////////////////////////////////////////
 // SUNXI platform
@@ -203,7 +204,7 @@ static void nfc_get_chip_id(int chip, uint8_t *id)
 		id[i] = readb(NFC_RAM0_BASE + i);
 }
 
-int nfc_init(void)
+int nfc_init(struct mtd_info *info)
 {
 	uint32_t ctl;
 	uint8_t id[6];
@@ -258,5 +259,13 @@ int nfc_init(void)
 	return 0;
 }
 
+void nfc_chip_init(struct mtd_info *info)
+{
 
+}
+
+void nfc_exit(struct mtd_info *info)
+{
+
+}
 
