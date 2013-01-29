@@ -39,7 +39,7 @@ static int __devinit nand_probe(struct platform_device *pdev)
 	}
 
 	// first scan to find the device and get the page size
-	if ((err = nand_scan_ident(mtd, 1, NULL)) < 0) {
+	if ((err = nand_scan_ident(&info->mtd, 1, NULL)) < 0) {
 		ERR_INFO("nand scan ident fail\n");
 		goto out_nfc_exit;
 	}
@@ -48,9 +48,9 @@ static int __devinit nand_probe(struct platform_device *pdev)
 	nfc_chip_init(&info->mtd);
 
 	// second phase scan
-	if ((err = nand_scan_tail(mtd)) < 0) {
+	if ((err = nand_scan_tail(&info->mtd)) < 0) {
 		ERR_INFO("nand scan tail fail\n");
-		goto err_nfc_exit;
+		goto out_nfc_exit;
 	}
 
 	platform_set_drvdata(pdev, info);
@@ -90,7 +90,7 @@ static int nand_resume(struct platform_device *pdev)
 	return 0;
 }
 
-static struct platform_driver plat_drv = {
+static struct platform_driver plat_driver = {
 	.probe		= nand_probe,
 	.remove		= nand_remove,
 	.shutdown   = nand_shutdown,
@@ -102,7 +102,7 @@ static struct platform_driver plat_drv = {
 	},
 };
 
-static struct platform_device plat_dev = {
+static struct platform_device plat_device = {
 	.name = DRIVER_NAME,
 	.id = 0,
 };
@@ -122,14 +122,14 @@ static int __init nand_init(void)
 
 	DBG_INFO("nand driver, init.\n");
 
-	if ((err = platform_driver_register(&plat_drv)) != 0) {
+	if ((err = platform_driver_register(&plat_driver)) != 0) {
 		ERR_INFO("platform_driver_register fail \n");
 		return err;
 	}
 	DBG_INFO("nand driver, ok.\n");
 
 	// add an NFC, may be should be done by platform driver
-	if ((err = platform_device_register(&plat_dev)) < 0) {
+	if ((err = platform_device_register(&plat_device)) < 0) {
 		ERR_INFO("platform_device_register fail\n");
 		return err;
 	}
@@ -151,10 +151,10 @@ static void __exit nand_exit(void)
     }
 
 	DBG_INFO("nand device : bye bye\n");
-	platform_device_unregister(&plat_dev);
+	platform_device_unregister(&plat_device);
 
 	DBG_INFO("nand driver : bye bye\n");
-	platform_driver_unregister(&plat_drv);
+	platform_driver_unregister(&plat_driver);
 }
 
 module_init(nand_init);

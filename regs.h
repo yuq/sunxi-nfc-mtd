@@ -20,7 +20,7 @@
 #define   CLK_DIV_RATIO_N_SHIFT       16
 #define   CLK_DIV_RATIO_N_MASK        (0x03 << CLK_DIV_RATIO_N_SHIFT)
 #define   CLK_DIV_RATIO_M_SHIFT       0
-#define   CLK_DIV_RATIO_M_MASK        (0x0f << CLK_DIV_RATIO_N_SHIFT)
+#define   CLK_DIV_RATIO_M_MASK        (0x0f << CLK_DIV_RATIO_M_SHIFT)
 
 #define PIO_IO_BASE                   0xf1c20800
 #define PC_CFG0_REG                   (PIO_IO_BASE + 0x48)
