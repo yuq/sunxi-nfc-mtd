@@ -15,6 +15,7 @@
 // it should be in high level that the nand_chip ops have been
 // performed with exclusion already
 static int read_offset = 0;
+static char page_buffer[9 * 1024];
 
 //////////////////////////////////////////////////////////////////
 // SUNXI platform
@@ -114,13 +115,21 @@ static void active_nand_clock(void)
 	writel(cfg, NAND_SCLK_CFG_REG);
 }
 
+#ifdef __LINUX__
+uint32_t pioc_handle;
+#endif
+
 // Set PIOC pin for NAND Flash use
 static void sunxi_set_nand_pio(void)
 {
 #ifdef __LINUX__
-	DBG_INFO("nand gpio_request\n");
-    if (gpio_request_ex("nand_para", NULL) == 0)
-		DBG_INFO("get nand pio ok \n");
+	pioc_handle = gpio_request_ex("nand_para", NULL);
+	if (pioc_handle) {
+		DBG_INFO("get nand pio ok\n");
+	}
+	else {
+		ERR_INFO("get nand pio fail\n");
+	}
 #else
 	writel(0x22222222, PC_CFG0_REG);
 	writel(0x22222222, PC_CFG1_REG);
@@ -132,7 +141,7 @@ static void sunxi_release_nand_pio(void)
 {
 #ifdef __LINUX__
 	DBG_INFO("nand gpio_release\n");
-	gpio_release("nand_para", NULL);
+	gpio_release(pioc_handle, 1);
 #else
 	writel(0, PC_CFG0_REG);
 	writel(0, PC_CFG1_REG);
@@ -181,11 +190,11 @@ static void disable_random(void)
 
 static void do_nand_cmd(unsigned command, int column, int page_addr)
 {
-	uint32_t ctl, cfg = command;
+	uint32_t cfg = command;
 	int addr_cycle, wait_rb_flag, data_fetch_flag, byte_count;
 	addr_cycle = wait_rb_flag = data_fetch_flag = 0;
 
-	DBG_INFO("command %x\n", command);
+	DBG_INFO("command %x ... ", command);
 	wait_cmdfifo_free();
 
 	switch (command) {
@@ -207,7 +216,7 @@ static void do_nand_cmd(unsigned command, int column, int page_addr)
 		byte_count = 1024;
 		wait_rb_flag = 1;
 		break;
-	case NAND_CMD_RNOUT:
+	case NAND_CMD_RNDOUT:
 		writel(column, NFC_REG_ADDR_LOW);
 		writel(0, NFC_REG_ADDR_HIGH);
 		addr_cycle = 2;
@@ -247,7 +256,7 @@ static void do_nand_cmd(unsigned command, int column, int page_addr)
 		cfg |= NFC_DATA_TRANS;
 		writel(byte_count, NFC_REG_CNT);
 	}
-	writel(cfg, NFC_REG_CTL);
+	writel(cfg, NFC_REG_CMD);
 
 	// wait command send complete
 	wait_cmdfifo_free();
@@ -265,8 +274,7 @@ static void do_nand_cmd(unsigned command, int column, int page_addr)
 		select_rb(0);
 	}
 
-	// reset read write offset
-	read_offset = 0;
+	DBG_INFO("done\n");
 }
 
 /////////////////////////////////////////////////////////////////
@@ -276,6 +284,7 @@ static void do_nand_cmd(unsigned command, int column, int page_addr)
 static void nfc_select_chip(struct mtd_info *mtd, int chip)
 {
 	uint32_t ctl;
+	DBG_INFO("select chip %d\n", chip);
 	// A10 has 8 CE pin to support 8 flash chips
     ctl = readl(NFC_REG_CTL);
     ctl &= ~NFC_CE_SEL;
@@ -286,10 +295,7 @@ static void nfc_select_chip(struct mtd_info *mtd, int chip)
 static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 						int page_addr)
 {
-	u32 cfg = command;
-	int i, j;
-	struct nand_chip *nand = mtd->priv;
-	int bufloc, dlen;
+	int i;
 
 	switch(command) {
 	case NAND_CMD_RESET:
@@ -298,36 +304,24 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		do_nand_cmd(command, column, page_addr);
 		break;
 	case NAND_CMD_READOOB:
-		printf("reading OOB\n");
-		memset(page_buffer, 0, sizeof(page_buffer));
 		do_nand_cmd(NAND_CMD_READ0, column + mtd->writesize, page_addr);
-		for (j = 0; j < 1024; j++)
-			page_buffer[j] = nand->read_byte(mtd);
-		read_offset = 0;
+		memcpy(page_buffer, (void *)NFC_RAM0_BASE, 1024);
 		break;
 	case NAND_CMD_READ0:
-		bufloc = 0;
-		dlen = mtd->writesize;
-		memset(page_buffer, 0, sizeof(page_buffer));
-		if (random_enabled)
-			sunxi_nand_enable_random(page_addr);
 		do_nand_cmd(NAND_CMD_READ0, column, page_addr);
-		if (random_enabled)
-			sunxi_nand_disable_random();
-		for (j = 0; j < 1024; j++)
-			page_buffer[bufloc++] = nand->read_byte(mtd);
-		read_offset = 0;
+		memcpy(page_buffer, (void *)NFC_RAM0_BASE, 1024);
 		for (i = 1; i < mtd->writesize / 1024 + 1; i++) {
 			do_nand_cmd(NAND_CMD_RNDOUT, column + i * 1024, page_addr);
-			for (j = 0; j < 1024; j++)
-				page_buffer[bufloc++] = nand->read_byte(mtd);
-			read_offset = 0;
+			memcpy(page_buffer + i * 1024, (void *)NFC_RAM0_BASE, 1024);
 		}
 		break;
 	default:
-		debug("sunxi_nand_command: Unhandled command %02x!\n", command);
+		ERR_INFO("Unhandled command %02x!\n", command);
 		break;
 	}
+
+	// reset read write offset
+	read_offset = 0;
 }
 
 static uint8_t nfc_read_byte(struct mtd_info *mtd)
@@ -347,22 +341,44 @@ static void nfc_write_buf(struct mtd_info *mtd, const uint8_t *buf, int len)
 
 static void nfc_read_buf(struct mtd_info *mtd, uint8_t *buf, int len)
 {
-	int i;
-	debug("sunxi_nand_read_buf %p %p %d\n", mtd, buf, len);
-	memcpy(buf, &page_buffer[0], len);
-	read_offset = 0;
-	memset(page_buffer, 0, sizeof(page_buffer));
+	memcpy(buf, page_buffer + read_offset, len);
+	read_offset += len;
 }
 
-int nfc_first_init(struct mtd_info *info)
+int nfc_first_init(struct mtd_info *mtd)
 {
 	uint32_t ctl;
-	struct nand_chip *nand = info->priv;
+	struct nand_chip *nand = mtd->priv;
 
 	// set NFC clock source
 	sunxi_set_nand_clock(20);
+
 	// set NFC pio
 	sunxi_set_nand_pio();
+
+	// reset NFC
+	ctl = readl(NFC_REG_CTL);
+	ctl |= NFC_RESET;
+	writel(ctl, NFC_REG_CTL);
+	while(readl(NFC_REG_CTL) & NFC_RESET);
+
+	// enable NFC
+	ctl = NFC_EN;
+	writel(ctl, NFC_REG_CTL);
+
+	nand->select_chip = nfc_select_chip;
+	nand->dev_ready = nfc_dev_ready;
+	nand->cmdfunc = nfc_cmdfunc;
+	nand->read_byte = nfc_read_byte;
+	nand->read_buf = nfc_read_buf;
+	nand->write_buf = nfc_write_buf;
+	return 0;
+}
+
+int nfc_second_init(struct mtd_info *mtd)
+{
+	uint32_t ctl;
+	struct nand_chip *nand = mtd->priv;
 
 	// disable interrupt
 	writel(0, NFC_REG_INT);
@@ -374,46 +390,9 @@ int nfc_first_init(struct mtd_info *info)
 	ctl &= ~NFC_ECC_MODE;
 	writel(ctl, NFC_REG_ECC_CTL);
 
-	// reset NFC
-	ctl = readl(NFC_REG_CTL);
-	ctl |= NFC_RESET;
-	writel(ctl, NFC_REG_CTL);
-	while(readl(NFC_REG_CTL) & NFC_RESET);
-
-	// set some value, needs to be fixed by nfc_chip_init
+	// enable NFC
 	ctl = NFC_EN;
-	ctl |= ( (0 & 0x1) << 2); // Bus width
-	ctl |= ( (0 & 0x1) << 6); // CE_CTL
-	ctl |= ( (0 & 0x1) << 7); // CE_CTL1
-	ctl |= ( (1 & 0xf) << 8); // PAGE_SIZE = 2K
-	ctl |= ((0 & 0x1) << 14); // RAM method, 1 for DMA, 0 for AHB?
-	ctl |= ((0 & 0x3) << 18); // DDR_TYPE
-	ctl |= ((0 & 0x1) << 31); // DEBUG
-	writel(ctl, NFC_REG_CTL);
 
-	ctl = (1 << 8); /* serial_access_mode = 1 */
-	writel(ctl, NFC_REG_TIMING_CTL);
-	writel(0xff, NFC_REG_TIMING_CFG);
-	writel(0x800, NFC_REG_SPARE_AREA);
-
-	// disable random
-	disable_random();
-
-	nand->select_chip = nfc_select_chip;
-	nand->dev_ready = nfc_dev_ready;
-	nand->cmdfunc = nfc_cmdfunc;
-	nand->read_byte = nfc_read_byte;
-	nand->read_buf = nfc_read_buf;
-	nand->write_buf = nfc_write_buf;
-	return 0;
-}
-
-int nfc_second_init(struct mtd_info *info)
-{
-	uint32_t ctl;
-	struct nand_chip *nand;
-
-	ctl = readl(NFC_REG_CTL);
 	// Bus width
 	if (nand->options & NAND_BUSWIDTH_16) {
 		DBG_INFO("flash chip bus width 16\n");
@@ -432,12 +411,21 @@ int nfc_second_init(struct mtd_info *info)
 	// 0 for 1K
 	ctl |= ((nand->page_shift - 10) & 0xf) << 8;
 	writel(ctl, NFC_REG_CTL);
+
+	ctl = (1 << 8); /* serial_access_mode = 1 */
+	writel(ctl, NFC_REG_TIMING_CTL);
+	writel(0xff, NFC_REG_TIMING_CFG);
 	writel(1 << nand->page_shift, NFC_REG_SPARE_AREA);
 
+	// disable random
+	disable_random();
+
+	DBG_INFO("OOB size = %d  page size = %d  block size = %d  total size = %lld\n",
+			 mtd->oobsize, mtd->writesize, mtd->erasesize, mtd->size);
 	return 0;
 }
 
-void nfc_exit(struct mtd_info *info)
+void nfc_exit(struct mtd_info *mtd)
 {
 	sunxi_release_nand_pio();
 	release_nand_clock();
