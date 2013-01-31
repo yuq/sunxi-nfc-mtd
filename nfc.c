@@ -270,7 +270,7 @@ static void do_nand_cmd(unsigned command, int column, int page_addr)
 		// wait rb1 ready
 		select_rb(1);
 		while (!check_rb_ready(1));
-		// select rb 0
+		// select rb 0 back
 		select_rb(0);
 	}
 
