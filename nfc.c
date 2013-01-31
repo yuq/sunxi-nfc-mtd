@@ -17,6 +17,8 @@
 static int read_offset = 0;
 static char page_buffer[9 * 1024];
 
+static struct nand_ecclayout sunxi_ecclayout;
+
 //////////////////////////////////////////////////////////////////
 // SUNXI platform
 //
@@ -194,7 +196,7 @@ static void do_nand_cmd(unsigned command, int column, int page_addr)
 	int addr_cycle, wait_rb_flag, data_fetch_flag, byte_count;
 	addr_cycle = wait_rb_flag = data_fetch_flag = 0;
 
-	DBG_INFO("command %x ... ", command);
+	DBG_INFO("command %x ...\n", command);
 	wait_cmdfifo_free();
 
 	switch (command) {
@@ -366,6 +368,7 @@ int nfc_first_init(struct mtd_info *mtd)
 	ctl = NFC_EN;
 	writel(ctl, NFC_REG_CTL);
 
+	nand->ecc.mode = NAND_ECC_SOFT;
 	nand->select_chip = nfc_select_chip;
 	nand->dev_ready = nfc_dev_ready;
 	nand->cmdfunc = nfc_cmdfunc;
@@ -377,6 +380,7 @@ int nfc_first_init(struct mtd_info *mtd)
 
 int nfc_second_init(struct mtd_info *mtd)
 {
+	int n, i;
 	uint32_t ctl;
 	struct nand_chip *nand = mtd->priv;
 
@@ -419,6 +423,15 @@ int nfc_second_init(struct mtd_info *mtd)
 
 	// disable random
 	disable_random();
+
+	// setup ECC layout for BCH8
+	n = (nand->page_shift - 9) * 14;
+	sunxi_ecclayout.eccbytes = n;
+	for (i = 0; i < n; i++)
+		sunxi_ecclayout.eccpos[i] = i + 2;
+	sunxi_ecclayout.oobfree->offset = n + 2;
+	sunxi_ecclayout.oobfree->length = mtd->oobsize - n - 2;
+	nand->ecc.layout = &sunxi_ecclayout;
 
 	DBG_INFO("OOB size = %d  page size = %d  block size = %d  total size = %lld\n",
 			 mtd->oobsize, mtd->writesize, mtd->erasesize, mtd->size);
