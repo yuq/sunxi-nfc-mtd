@@ -1,5 +1,5 @@
-#ifndef _SUNXI_REGS_H
-#define _SUNXI_REGS_H
+#ifndef _SUNXI_NAND_REGS_H
+#define _SUNXI_NAND_REGS_H
 
 #define CCM_IO_BASE                   0xf1c20000
 #define PLL5_CFG_REG                  (CCM_IO_BASE + 0x20)
