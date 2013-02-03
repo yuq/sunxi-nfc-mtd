@@ -21,7 +21,7 @@ static int read_offset = 0;
 static int write_offset = 0;
 static char *read_buffer = NULL;
 static char *write_buffer = NULL;
-static int buffer_size = 4096;
+static int buffer_size = 4096 + 1024;
 static dma_addr_t read_buffer_dma;
 static dma_addr_t write_buffer_dma;
 static int dma_hdle;
@@ -292,7 +292,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 			column += mtd->writesize;
 		}
 		else
-			sector_count = mtd->writesize / 1024;
+			sector_count = buffer_size / 1024;
 			
 		//access NFC internal RAM by DMA bus
 		writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
@@ -322,6 +322,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 	case NAND_CMD_SEQIN:	
 		program_column = column;
 		program_page = page_addr;
+		write_offset = 0;
 		return;
 	case NAND_CMD_PAGEPROG:
 		cfg = NAND_CMD_SEQIN;
@@ -330,13 +331,13 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		page_addr = program_page;
 		//access NFC internal RAM by DMA bus
 		writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
-		dma_nand_config_start(dma_hdle, 1, (uint32_t)write_buffer, mtd->writesize);
+		dma_nand_config_start(dma_hdle, 1, (uint32_t)write_buffer, buffer_size);
 		// RAM0 is 1K size
 		byte_count =1024;
 		writel(0x00008510, NFC_REG_WCMD_SET);
 		cfg |= NFC_SEND_CMD2 | NFC_DATA_SWAP_METHOD | NFC_ACCESS_DIR;
 		cfg |= 2 << 30;
-		sector_count = mtd->writesize / 1024;
+		sector_count = buffer_size / 1024;
 		break;
 	case NAND_CMD_STATUS:
 		byte_count = 1;
@@ -413,9 +414,8 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 
 	//DBG_INFO("done\n");
 
-	// reset read write offset
+	// read write offset
 	read_offset = 0;
-	write_offset = 0;
 }
 
 static uint8_t nfc_read_byte(struct mtd_info *mtd)
@@ -431,7 +431,8 @@ static int nfc_dev_ready(struct mtd_info *mtd)
 static void nfc_write_buf(struct mtd_info *mtd, const uint8_t *buf, int len)
 {
 	if (write_offset + len > buffer_size) {
-		ERR_INFO("write too much\n");
+		ERR_INFO("write too much offset=%d len=%d buffer size=%d\n",
+				 write_offset, len, buffer_size);
 		return;
 	}
 	memcpy(write_buffer + write_offset, buf, len);
@@ -441,7 +442,8 @@ static void nfc_write_buf(struct mtd_info *mtd, const uint8_t *buf, int len)
 static void nfc_read_buf(struct mtd_info *mtd, uint8_t *buf, int len)
 {
 	if (read_offset + len > buffer_size) {
-		ERR_INFO("read too much\n");
+		ERR_INFO("read too much offset=%d len=%d buffer size=%d\n", 
+				 read_offset, len, buffer_size);
 		return;
 	}
 	memcpy(buf, read_buffer + read_offset, len);
@@ -628,7 +630,7 @@ int nfc_second_init(struct mtd_info *mtd)
 	}
 
 	// alloc buffer
-	buffer_size = mtd->writesize;
+	buffer_size = mtd->writesize + 1024;
 	read_buffer = kmalloc(buffer_size, GFP_KERNEL);
 	if (read_buffer == NULL) {
 		ERR_INFO("alloc read buffer fail\n");

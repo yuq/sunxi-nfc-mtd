@@ -56,14 +56,21 @@ static int __devinit nand_probe(struct platform_device *pdev)
 		goto out_nfc_exit;
 	}
 
+	if ((err = mtd_device_parse_register(&info->mtd, NULL, NULL, NULL, 0)) < 0) {
+		ERR_INFO("register mtd device fail\n");
+		goto out_release_nand;
+	}
+
 	platform_set_drvdata(pdev, info);
 	return 0;
 
- out_nfc_exit:
+out_release_nand:
+	nand_release(&info->mtd);
+out_nfc_exit:
 	nfc_exit(&info->mtd);
- out_free_info:
+out_free_info:
 	kfree(info);
- out:
+out:
 	return err;
 }
 
@@ -72,6 +79,7 @@ static int __devexit nand_remove(struct platform_device *pdev)
 	struct sunxi_nand_info *info = platform_get_drvdata(pdev);
 
 	platform_set_drvdata(pdev, NULL);
+	mtd_device_unregister(&info->mtd);
 	nand_release(&info->mtd);
 	nfc_exit(&info->mtd);
 	kfree(info);
