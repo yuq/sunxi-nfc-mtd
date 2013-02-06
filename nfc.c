@@ -253,6 +253,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 {
 	static int program_column = -1, program_page = -1;
 	uint32_t cfg = command;
+	int read_size;
 	int addr_cycle, wait_rb_flag, byte_count, sector_count;
 	addr_cycle = wait_rb_flag = byte_count = sector_count = 0;
 
@@ -288,17 +289,20 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 			cfg = NAND_CMD_READ0;
 			// sector num to read
 			sector_count = 1024 / 1024;
+			read_size = 1024;
 			// OOB offset
 			column += mtd->writesize;
 		}
-		else
-			sector_count = buffer_size / 1024;
+		else {
+			sector_count = mtd->writesize / 1024;
+			read_size = mtd->writesize;
+		}
 			
 		//access NFC internal RAM by DMA bus
 		writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
 		// if the size is smaller than NFC_REG_SECTOR_NUM, read command won't finish
 		// does that means the data read out (by DMA through random data output) hasn't finish?
-		dma_nand_config_start(dma_hdle, 0, (uint32_t)read_buffer, sector_count * 1024);
+		dma_nand_config_start(dma_hdle, 0, (uint32_t)read_buffer, read_size);
 		addr_cycle = 5;
 		// RAM0 is 1K size
 		byte_count =1024;
@@ -331,13 +335,19 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		page_addr = program_page;
 		//access NFC internal RAM by DMA bus
 		writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
-		dma_nand_config_start(dma_hdle, 1, (uint32_t)write_buffer, buffer_size);
+		dma_nand_config_start(dma_hdle, 1, (uint32_t)write_buffer, mtd->writesize);
 		// RAM0 is 1K size
 		byte_count =1024;
 		writel(0x00008510, NFC_REG_WCMD_SET);
 		cfg |= NFC_SEND_CMD2 | NFC_DATA_SWAP_METHOD | NFC_ACCESS_DIR;
 		cfg |= 2 << 30;
-		sector_count = buffer_size / 1024;
+		sector_count = mtd->writesize / 1024;
+		writel(0xff, NFC_REG_USER_DATA(0));
+		writel(0x1, NFC_REG_USER_DATA(1));
+		writel(0x2, NFC_REG_USER_DATA(2));
+		writel(0x3, NFC_REG_USER_DATA(3));
+		writel(0x4, NFC_REG_USER_DATA(4));
+		writel(0x5, NFC_REG_USER_DATA(5));
 		break;
 	case NAND_CMD_STATUS:
 		byte_count = 1;
@@ -390,6 +400,15 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 
 	switch (command) {
 	case NAND_CMD_READ0:
+		dma_nand_wait_finish();
+		DBG_INFO("USRDATA: %x %x %x %x %x %x\n", 
+				 readl(NFC_REG_USER_DATA(0)),
+				 readl(NFC_REG_USER_DATA(1)),
+				 readl(NFC_REG_USER_DATA(2)),
+				 readl(NFC_REG_USER_DATA(3)),
+				 readl(NFC_REG_USER_DATA(4)),
+				 readl(NFC_REG_USER_DATA(5)));
+		break;
 	case NAND_CMD_READOOB:
 	case NAND_CMD_PAGEPROG:
 		dma_nand_wait_finish();
@@ -539,6 +558,11 @@ static void print_page(struct mtd_info *mtd, int page)
 	nfc_read_buf(mtd, buff, 6);
 	DBG_INFO("READ: %x %x %x %x %x %x\n",
 			 buff[0], buff[1], buff[2], buff[3], buff[4], buff[5]);
+
+	nfc_cmdfunc(mtd, NAND_CMD_READOOB, 0, page);
+	nfc_read_buf(mtd, buff, 6);
+	DBG_INFO("READOOB: %x %x %x %x %x %x\n",
+			 buff[0], buff[1], buff[2], buff[3], buff[4], buff[5]);
 }
 
 static void test_nfc(struct mtd_info *mtd)
@@ -658,7 +682,7 @@ int nfc_second_init(struct mtd_info *mtd)
 	}
 
 	// test command
-	//test_nfc(mtd);
+	test_nfc(mtd);
 
 	return 0;
 

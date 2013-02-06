@@ -101,6 +101,11 @@ static int nand_resume(struct platform_device *pdev)
 	return 0;
 }
 
+static void	nfc_dev_release(struct device *dev)
+{
+
+}
+
 static struct platform_driver plat_driver = {
 	.probe		= nand_probe,
 	.remove		= nand_remove,
@@ -116,6 +121,9 @@ static struct platform_driver plat_driver = {
 static struct platform_device plat_device = {
 	.name = DRIVER_NAME,
 	.id = 0,
+	.dev = {
+		.release = nfc_dev_release,
+	},
 };
 
 static int __init nand_init(void)
