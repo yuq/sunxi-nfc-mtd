@@ -166,12 +166,21 @@ static void sunxi_release_nand_pio(void)
 
 static inline void wait_cmdfifo_free(void)
 {
-	while (readl(NFC_REG_ST) & NFC_CMD_FIFO_STATUS);
+	int timeout = 0xffff;
+	while ((timeout--) && (readl(NFC_REG_ST) & NFC_CMD_FIFO_STATUS));
+	if (timeout <= 0) {
+		ERR_INFO("wait_cmdfifo_free timeout\n");
+	}
 }
 
 static inline void wait_cmd_finish(void)
 {
-	while(!(readl(NFC_REG_ST) & NFC_CMD_INT_FLAG));
+	int timeout = 0xffff;
+	while((timeout--) && !(readl(NFC_REG_ST) & NFC_CMD_INT_FLAG));
+	if (timeout <= 0) {
+		ERR_INFO("wait_cmd_finish timeout\n");
+		return;
+	}
 	writel(NFC_CMD_INT_FLAG, NFC_REG_ST);
 }
 
@@ -590,6 +599,43 @@ static void test_nfc(struct mtd_info *mtd)
 	print_page(mtd, page);
 }
 
+// Test unit ops
+static void test_ops(struct mtd_info *mtd)
+{
+	uint32_t page = 1280;
+	uint32_t v1, v2;
+
+	// test sequence read
+	wait_cmdfifo_free();
+	// NFC_DATA_TRANS = 1, NFC fetch data to RAM0
+	// NFC_CMD_TYPE = 1,2,3 won't read out any thing
+	v1 = NAND_CMD_READ0 | NFC_SEQ | NFC_SEND_CMD1 | NFC_DATA_TRANS | NFC_SEND_ADR | NFC_SEND_CMD2 | ((5 - 1) << 16) | NFC_WAIT_FLAG | (3 << 30);
+	v2 = NAND_CMD_READSTART;
+	writel(page << 16, NFC_REG_ADDR_LOW);
+	writel(page >> 16, NFC_REG_ADDR_HIGH);
+	//writel(2, NFC_REG_SECTOR_NUM);
+	// NFC_REG_CNT = n, fetch n byte to RAM
+	writel(1, NFC_REG_CNT);
+	writel(v2, NFC_REG_RCMD_SET);
+	writel(v1, NFC_REG_CMD);
+	wait_cmdfifo_free();
+	wait_cmd_finish();
+	DBG_INFO("SEQ READ IO: %x %x %x %x %x %x\n", 
+			 readb(NFC_REG_IO_DATA), 
+			 readb(NFC_REG_IO_DATA), 
+			 readb(NFC_REG_IO_DATA), 
+			 readb(NFC_REG_IO_DATA), 
+			 readb(NFC_REG_IO_DATA), 
+			 readb(NFC_REG_IO_DATA));
+	DBG_INFO("SEQ READ RAM: %x %x %x %x %x %x\n",
+			 readb(NFC_RAM0_BASE),
+			 readb(NFC_RAM0_BASE + 1),
+			 readb(NFC_RAM0_BASE + 2),
+			 readb(NFC_RAM0_BASE + 3),
+			 readb(NFC_RAM0_BASE + 4),
+			 readb(NFC_RAM0_BASE + 5));
+}
+
 int nfc_second_init(struct mtd_info *mtd)
 {
 	int n, i, err;
@@ -682,7 +728,8 @@ int nfc_second_init(struct mtd_info *mtd)
 	}
 
 	// test command
-	test_nfc(mtd);
+	//test_nfc(mtd);
+	test_ops(mtd);
 
 	return 0;
 
