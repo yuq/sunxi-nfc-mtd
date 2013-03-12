@@ -330,7 +330,6 @@ static void nfc_select_chip(struct mtd_info *mtd, int chip)
 static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 						int page_addr)
 {
-	int i;
 	uint32_t cfg = command;
 	int read_size, do_enable_ecc = 0;
 	int addr_cycle, wait_rb_flag, byte_count, sector_count;
@@ -399,6 +398,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		// 1 - spare command?
 		// 0 - normal command
 		cfg |= 2 << 30;
+		//DBG_INFO("cmdfunc read %d %d %d\n", command, column, page_addr);
 		break;
 	case NAND_CMD_ERASE1:
 		addr_cycle = 3;
@@ -423,8 +423,11 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		cfg |= 2 << 30;
 		sector_count = mtd->writesize / 1024;
 		do_enable_ecc = 1;
+		/*
 		for (i = 0; i < 80/4; i++)
 			writel(*((unsigned int *)(write_buffer + mtd->oobsize) + i), NFC_REG_USER_DATA(i));
+		*/
+		DBG_INFO("cmdfunc program %d %d\n", column, page_addr);
 		break;
 	case NAND_CMD_STATUS:
 		byte_count = 1;
@@ -504,6 +507,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		select_rb(0);
 		break;
 	case NAND_CMD_READ0:
+		/*
 		printk(KERN_INFO "USRDATA: ");
 		for (i = 0; i < 80/4; i++) {
 			*((unsigned int *)(read_buffer + mtd->oobsize) + i) = readl(NFC_REG_USER_DATA(i));
@@ -514,6 +518,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 				   read_buffer[mtd->oobsize + i*4 + 3]);
 		}
 		printk("\n");
+		*/
 		if (check_ecc(sector_count))
 			ERR_INFO("ECC check fail\n");
 		break;
@@ -610,116 +615,19 @@ out:
 	return get_chip_status(mtd);
 }
 
-static int nfc_read_page_hwecc(struct mtd_info *mtd, struct nand_chip *chip, uint8_t *buf, int page)
+static void nfc_ecc_hwctl(struct mtd_info *mtd, int mode)
 {
-	int err = 0;
-	uint32_t cfg = NAND_CMD_READ0;
 
-	wait_cmdfifo_free();
-
-	//access NFC internal RAM by DMA bus
-	writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
-
-	dma_nand_config_start(dma_hdle, 0, (uint32_t)read_buffer, mtd->writesize);
-
-	// read command
-	writel(0x00e00530, NFC_REG_RCMD_SET);
-
-	// address
-	writel(page << 16, NFC_REG_ADDR_LOW);
-	writel(page >> 16, NFC_REG_ADDR_HIGH);
-	cfg |= 4 << 16;
-
-	// byte count
-	writel(1024, NFC_REG_CNT);
-	writel(mtd->writesize / 1024, NFC_REG_SECTOR_NUM);
-
-	// command attr
-	cfg |= NFC_SEND_CMD2 | NFC_DATA_SWAP_METHOD | NFC_SEND_ADR | 
-		NFC_WAIT_FLAG | NFC_DATA_TRANS | NFC_SEND_CMD1 |
-		NFC_DATA_SWAP_METHOD | (2 << 30);
-
-	// enable ecc
-	enable_ecc(1);
-
-	// send command
-	writel(cfg, NFC_REG_CMD);
-
-	// wait DMA
-	dma_nand_wait_finish();
-
-	// wait command send complete
-	wait_cmdfifo_free();
-	wait_cmd_finish();
-
-	if (check_ecc(mtd->writesize / 1024)) {
-		ERR_INFO("ECC check fail\n");
-		err = -1;
-	}
-
-	// disable ecc
-	disable_ecc();
-
-	// switch to AHB
-	writel(readl(NFC_REG_CTL) & ~NFC_RAM_METHOD, NFC_REG_CTL);
-
-	// Can we just DMA the data directly into buff?
-	// The buff must be 4 bytes aligned (can we ensure this?)
-	if (!err)
-		memcpy(buf, read_buffer, mtd->writesize);
-
-	return err;
 }
 
-static void nfc_write_page_hwecc(struct mtd_info *mtd, struct nand_chip *chip, const uint8_t *buf)
+static int nfc_ecc_calculate(struct mtd_info *mtd, const uint8_t *dat, uint8_t *ecc_code)
 {
-	uint32_t cfg = NAND_CMD_SEQIN;
+	return 0;
+}
 
-	// If buf is 4 bytes aligned, we can directly DMA it
-	memcpy(write_buffer, buf, mtd->writesize);
-
-	wait_cmdfifo_free();
-
-	//access NFC internal RAM by DMA bus
-	writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
-
-	dma_nand_config_start(dma_hdle, 1, (uint32_t)write_buffer, mtd->writesize);
-
-	// write command
-	writel(0x00008510, NFC_REG_WCMD_SET);
-
-	// address
-	writel(program_page << 16, NFC_REG_ADDR_LOW);
-	writel(program_page >> 16, NFC_REG_ADDR_HIGH);
-	cfg |= 4 << 16;
-
-	// byte count
-	writel(1024, NFC_REG_CNT);
-	writel(mtd->writesize / 1024, NFC_REG_SECTOR_NUM);
-
-	// command attr
-	cfg |= NFC_SEND_CMD2 | NFC_DATA_SWAP_METHOD | NFC_SEND_ADR | 
-		NFC_WAIT_FLAG | NFC_DATA_TRANS | NFC_SEND_CMD1 |
-		NFC_DATA_SWAP_METHOD | NFC_ACCESS_DIR | (2 << 30);
-
-	// enable ecc
-	enable_ecc(1);
-
-	// send command
-	writel(cfg, NFC_REG_CMD);
-
-	// wait DMA
-	dma_nand_wait_finish();
-
-	// wait command send complete
-	wait_cmdfifo_free();
-	wait_cmd_finish();
-
-	// disable ecc
-	disable_ecc();
-
-	// switch to AHB
-	writel(readl(NFC_REG_CTL) & ~NFC_RAM_METHOD, NFC_REG_CTL);
+static int nfc_ecc_correct(struct mtd_info *mtd, uint8_t *dat, uint8_t *read_ecc, uint8_t *calc_ecc)
+{
+	return 0;
 }
 
 static void first_test_nfc(struct mtd_info *mtd)
@@ -766,8 +674,9 @@ int nfc_first_init(struct mtd_info *mtd)
 	//first_test_nfc(mtd);
 
 	nand->ecc.mode = NAND_ECC_HW;
-	nand->ecc.read_page = nfc_read_page_hwecc;
-	nand->ecc.write_page = nfc_write_page_hwecc;
+	nand->ecc.hwctl = nfc_ecc_hwctl;
+	nand->ecc.calculate = nfc_ecc_calculate;
+	nand->ecc.correct = nfc_ecc_correct;
 	nand->select_chip = nfc_select_chip;
 	nand->dev_ready = nfc_dev_ready;
 	nand->cmdfunc = nfc_cmdfunc;
@@ -801,7 +710,6 @@ static void test_nfc(struct mtd_info *mtd)
 	int page = 1280;
 	unsigned char buff[1024];
 	int blocks = 2, num_blocks = mtd->writesize / 1024;
-	static unsigned char buffer[8192];
 
 	DBG_INFO("============== TEST NFC ================\n");
 
@@ -831,25 +739,6 @@ static void test_nfc(struct mtd_info *mtd)
 	nfc_write_buf(mtd, buff, 1024);
 	nfc_cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
 	nfc_wait(mtd, nand);
-	print_page(mtd, page);
-
-	// test nfc read page
-	nfc_read_page_hwecc(mtd, nand, buffer, page);
-	printk(KERN_INFO "Test nfc_read_page_hwecc:\n");
-	for (i = 0; i < 512; i++)
-		printk("%02x ", buffer[i]);
-
-	// erase block
-	nfc_cmdfunc(mtd, NAND_CMD_ERASE1, 0, page);
-	nfc_cmdfunc(mtd, NAND_CMD_ERASE2, -1, -1);
-	nfc_wait(mtd, nand);
-	print_page(mtd, page);
-
-	// test nfc write page
-	for (i = 0, n = 128; i < 8192; i++, n++)
-		buffer[i] = n % 256;
-	nfc_cmdfunc(mtd, NAND_CMD_SEQIN, 0, page);
-	nfc_write_page_hwecc(mtd, nand, buffer);
 	print_page(mtd, page);
 }
 
@@ -1023,7 +912,7 @@ int nfc_second_init(struct mtd_info *mtd)
 	}
 
 	// test command
-	test_nfc(mtd);
+	//test_nfc(mtd);
 	//test_ops(mtd);
 
 	return 0;
