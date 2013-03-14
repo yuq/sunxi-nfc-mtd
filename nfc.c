@@ -315,7 +315,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 {
 	int i;
 	uint32_t cfg = command;
-	int read_size, do_enable_ecc = 0;
+	int read_size, write_size, do_enable_ecc = 0;
 	int addr_cycle, wait_rb_flag, byte_count, sector_count;
 	addr_cycle = wait_rb_flag = byte_count = sector_count = 0;
 
@@ -360,7 +360,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 			sector_count = mtd->writesize / 1024;
 			read_size = mtd->writesize;
 			do_enable_ecc = 1;
-			DBG_INFO("cmdfunc read %d %d\n", column, page_addr);
+			//DBG_INFO("cmdfunc read %d %d\n", column, page_addr);
 		}
 			
 		//access NFC internal RAM by DMA bus
@@ -387,7 +387,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		break;
 	case NAND_CMD_ERASE1:
 		addr_cycle = 3;
-		DBG_INFO("cmdfunc earse block %d\n", page_addr);
+		//DBG_INFO("cmdfunc earse block %d\n", page_addr);
 		break;
 	case NAND_CMD_SEQIN:	
 		program_column = column;
@@ -399,19 +399,35 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		addr_cycle = 5;
 		column = program_column;
 		page_addr = program_page;
+		// for write OOB
+		if (column == mtd->writesize) {
+			sector_count = 1024 /1024;
+			write_size = 1024;
+		}
+		else if (column == 0) {
+			sector_count = mtd->writesize / 1024;
+			do_enable_ecc = 1;
+			write_size = mtd->writesize;
+			for (i = 0; i < sector_count; i++)
+				writel(*((unsigned int *)(write_buffer + mtd->writesize) + i), NFC_REG_USER_DATA(i));
+		}
+		else {
+			ERR_INFO("program unsupported column %d %d\n", column, page_addr);
+			return;
+		}
+
 		//access NFC internal RAM by DMA bus
 		writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
-		dma_nand_config_start(dma_hdle, 1, (uint32_t)write_buffer, mtd->writesize);
+		dma_nand_config_start(dma_hdle, 1, (uint32_t)write_buffer, write_size);
 		// RAM0 is 1K size
 		byte_count =1024;
 		writel(0x00008510, NFC_REG_WCMD_SET);
 		cfg |= NFC_SEND_CMD2 | NFC_DATA_SWAP_METHOD | NFC_ACCESS_DIR;
 		cfg |= 2 << 30;
-		sector_count = mtd->writesize / 1024;
-		do_enable_ecc = 1;
-		for (i = 0; i < sector_count; i++)
-			writel(*((unsigned int *)(write_buffer + mtd->writesize) + i), NFC_REG_USER_DATA(i));
-		DBG_INFO("cmdfunc program %d %d\n", column, page_addr);
+		if (column != 0) {
+			DBG_INFO("cmdfunc program %d %d with %x %x %x\n", column, page_addr, 
+					 write_buffer[0], write_buffer[1], write_buffer[2]);
+		}
 		break;
 	case NAND_CMD_STATUS:
 		byte_count = 1;
@@ -547,7 +563,7 @@ static irqreturn_t nfc_interrupt_handler(int irq, void *dev_id)
 		DBG_INFO("CMD INT\n");
 	}
 	if (st & NFC_DMA_INT_FLAG) {
-		DBG_INFO("DMA INT\n");
+		//DBG_INFO("DMA INT\n");
 	}
 	if (st & NFC_NATCH_INT_FLAG) {
 		DBG_INFO("NATCH INT\n");
@@ -685,7 +701,7 @@ static void test_nfc(struct mtd_info *mtd)
 {
 	int i, j, n=0;
 	struct nand_chip *nand = mtd->priv;
-	int page = 1280;
+	int page = 639;
 	unsigned char buff[1024];
 	int blocks = 2, num_blocks = mtd->writesize / 1024;
 
@@ -699,7 +715,7 @@ static void test_nfc(struct mtd_info *mtd)
 	nfc_cmdfunc(mtd, NAND_CMD_ERASE2, -1, -1);
 	nfc_wait(mtd, nand);
 	print_page(mtd, page);
-
+/*
 	// write block
 	nfc_cmdfunc(mtd, NAND_CMD_SEQIN, 0, page);
 	for (i = 0; i < blocks; i++) {
@@ -713,6 +729,15 @@ static void test_nfc(struct mtd_info *mtd)
 	}
 	// wrong mtd->oobsize for SAMSUNG K9GBG08U0A
 	for (i = 0, n = 128; i < 640; i++, n++)
+		buff[i] = n % 256;
+	nfc_write_buf(mtd, buff, 1024);
+	nfc_cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
+	nfc_wait(mtd, nand);
+	print_page(mtd, page);
+*/
+	// test oob write
+	nfc_cmdfunc(mtd, NAND_CMD_SEQIN, mtd->writesize, page);
+	for (i = 0, n = 0xff; i < 640; i++, n++)
 		buff[i] = n % 256;
 	nfc_write_buf(mtd, buff, 1024);
 	nfc_cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
