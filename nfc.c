@@ -244,7 +244,6 @@ int check_ecc(int eblock_cnt)
     int ecc_mode;
 	int max_ecc_bit_cnt = 16;
 	int cfg;
-    uint8_t ecc_cnt[16];
 
 	ecc_mode = (readl(NFC_REG_ECC_CTL) & NFC_ECC_MODE) >> NFC_ECC_MODE_SHIFT;
 	if(ecc_mode == 0)
@@ -266,41 +265,25 @@ int check_ecc(int eblock_cnt)
     if(ecc_mode == 8)
 		max_ecc_bit_cnt = 64;
 
-	//check ecc errro
+	//check ecc error
 	cfg = readl(NFC_REG_ECC_ST) & 0xffff;
 	for (i = 0; i < eblock_cnt; i++) {
-		if (cfg & (1<<i))
+		if (cfg & (1<<i)) {
+			ERR_INFO("ECC too many error at %d\n", i);
 			return -1;
+		}
 	}
 
 	//check ecc limit
-	cfg = readl(NFC_REG_ECC_CNT0);
-	ecc_cnt[0] = (uint8_t)((cfg>>0)&0xff);
-	ecc_cnt[1] = (uint8_t)((cfg>>8)&0xff);
-	ecc_cnt[2] = (uint8_t)((cfg>>16)&0xff);
-	ecc_cnt[3] = (uint8_t)((cfg>>24)&0xff);
-
-	cfg = readl(NFC_REG_ECC_CNT1);
-	ecc_cnt[4] = (uint8_t)((cfg>>0)&0xff);
-	ecc_cnt[5] = (uint8_t)((cfg>>8)&0xff);
-	ecc_cnt[6] = (uint8_t)((cfg>>16)&0xff);
-	ecc_cnt[7] = (uint8_t)((cfg>>24)&0xff);
-
-	cfg = readl(NFC_REG_ECC_CNT2);
-	ecc_cnt[8] = (uint8_t)((cfg>>0)&0xff);
-	ecc_cnt[9] = (uint8_t)((cfg>>8)&0xff);
-	ecc_cnt[10] = (uint8_t)((cfg>>16)&0xff);
-	ecc_cnt[11] = (uint8_t)((cfg>>24)&0xff);
-
-	cfg = readl(NFC_REG_ECC_CNT3);
-	ecc_cnt[12] = (uint8_t)((cfg>>0)&0xff);
-	ecc_cnt[13] = (uint8_t)((cfg>>8)&0xff);
-	ecc_cnt[14] = (uint8_t)((cfg>>16)&0xff);
-	ecc_cnt[15] = (uint8_t)((cfg>>24)&0xff);
-
-	for (i = 0; i < eblock_cnt; i++) {
-		if((max_ecc_bit_cnt - 4) <= ecc_cnt[i])
-			return 1;
+	for (i = 0; i < eblock_cnt; i += 4) {
+		int j, n = (eblock_cnt - i) < 4 ? (eblock_cnt - i) : 4;
+		cfg = readl(NFC_REG_ECC_CNT0 + i);
+		for (j = 0; j < n; j++, cfg >>= 8) {
+			if ((cfg & 0xff) >= max_ecc_bit_cnt - 4) {
+				ERR_INFO("ECC limit %d/%d\n", (cfg & 0xff), max_ecc_bit_cnt);
+				//return -1;
+			}
+		}
 	}
 
 	return 0;
@@ -776,7 +759,7 @@ static void test_ops(struct mtd_info *mtd)
 
 int nfc_second_init(struct mtd_info *mtd)
 {
-	int i, err, j, n;
+	int i, err, j;
 	uint32_t ctl;
 	uint8_t id[8];
 	struct nand_chip_param *chip_param = NULL;
@@ -858,17 +841,14 @@ int nfc_second_init(struct mtd_info *mtd)
 	// disable random
 	disable_random();
 
-	// setup ECC layout for ECC mode 3
-	n = mtd->writesize / 1024 * 60;
-	sunxi_ecclayout.eccbytes = n;
-	for (i = 0; i < n; i++)
-		sunxi_ecclayout.eccpos[i] = i;
-	sunxi_ecclayout.oobavail = 0;
-	sunxi_ecclayout.oobfree->offset = n;
-	sunxi_ecclayout.oobfree->length = 0;
+	// setup ECC layout
+	sunxi_ecclayout.eccbytes = 0;
+	sunxi_ecclayout.oobavail = mtd->writesize / 1024 * 4 - 2;
+	sunxi_ecclayout.oobfree->offset = 1;
+	sunxi_ecclayout.oobfree->length = mtd->writesize / 1024 * 4 - 2;
 	nand->ecc.layout = &sunxi_ecclayout;
 	nand->ecc.size = mtd->writesize;
-	nand->ecc.bytes = 56;
+	nand->ecc.bytes = 0;
 
 	// setup DMA
 	dma_hdle = dma_nand_request(1);
