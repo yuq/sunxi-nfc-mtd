@@ -701,7 +701,7 @@ static void test_nfc(struct mtd_info *mtd)
 {
 	int i, j, n=0;
 	struct nand_chip *nand = mtd->priv;
-	int page = 639;
+	int page = 1280;
 	unsigned char buff[1024];
 	int blocks = 2, num_blocks = mtd->writesize / 1024;
 
@@ -715,7 +715,7 @@ static void test_nfc(struct mtd_info *mtd)
 	nfc_cmdfunc(mtd, NAND_CMD_ERASE2, -1, -1);
 	nfc_wait(mtd, nand);
 	print_page(mtd, page);
-/*
+
 	// write block
 	nfc_cmdfunc(mtd, NAND_CMD_SEQIN, 0, page);
 	for (i = 0; i < blocks; i++) {
@@ -734,7 +734,8 @@ static void test_nfc(struct mtd_info *mtd)
 	nfc_cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
 	nfc_wait(mtd, nand);
 	print_page(mtd, page);
-*/
+
+/*
 	// test oob write
 	nfc_cmdfunc(mtd, NAND_CMD_SEQIN, mtd->writesize, page);
 	for (i = 0, n = 0xff; i < 640; i++, n++)
@@ -743,6 +744,7 @@ static void test_nfc(struct mtd_info *mtd)
 	nfc_cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
 	nfc_wait(mtd, nand);
 	print_page(mtd, page);
+*/
 }
 
 // Test unit ops
@@ -912,7 +914,7 @@ int nfc_second_init(struct mtd_info *mtd)
 	}
 
 	// test command
-	test_nfc(mtd);
+	//test_nfc(mtd);
 	//test_ops(mtd);
 
 	return 0;
