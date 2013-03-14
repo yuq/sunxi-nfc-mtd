@@ -330,6 +330,7 @@ static void nfc_select_chip(struct mtd_info *mtd, int chip)
 static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 						int page_addr)
 {
+	int i;
 	uint32_t cfg = command;
 	int read_size, do_enable_ecc = 0;
 	int addr_cycle, wait_rb_flag, byte_count, sector_count;
@@ -358,8 +359,9 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 	case NAND_CMD_RNDOUT:
 		addr_cycle = 2;
 		writel(0xE0, NFC_REG_RCMD_SET);
-		byte_count = 0x400;
-		cfg |= NFC_SEND_CMD2;
+		byte_count = mtd->oobsize;
+		cfg |= NFC_SEQ | NFC_SEND_CMD2;
+		wait_rb_flag = 1;
 		break;
 	case NAND_CMD_READOOB:
 	case NAND_CMD_READ0:
@@ -375,6 +377,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 			sector_count = mtd->writesize / 1024;
 			read_size = mtd->writesize;
 			do_enable_ecc = 1;
+			DBG_INFO("cmdfunc read %d %d\n", column, page_addr);
 		}
 			
 		//access NFC internal RAM by DMA bus
@@ -398,10 +401,10 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		// 1 - spare command?
 		// 0 - normal command
 		cfg |= 2 << 30;
-		//DBG_INFO("cmdfunc read %d %d %d\n", command, column, page_addr);
 		break;
 	case NAND_CMD_ERASE1:
 		addr_cycle = 3;
+		DBG_INFO("cmdfunc earse block %d\n", page_addr);
 		break;
 	case NAND_CMD_SEQIN:	
 		program_column = column;
@@ -423,10 +426,8 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		cfg |= 2 << 30;
 		sector_count = mtd->writesize / 1024;
 		do_enable_ecc = 1;
-		/*
-		for (i = 0; i < 80/4; i++)
-			writel(*((unsigned int *)(write_buffer + mtd->oobsize) + i), NFC_REG_USER_DATA(i));
-		*/
+		for (i = 0; i < sector_count; i++)
+			writel(*((unsigned int *)(write_buffer + mtd->writesize) + i), NFC_REG_USER_DATA(i));
 		DBG_INFO("cmdfunc program %d %d\n", column, page_addr);
 		break;
 	case NAND_CMD_STATUS:
@@ -507,20 +508,8 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		select_rb(0);
 		break;
 	case NAND_CMD_READ0:
-		/*
-		printk(KERN_INFO "USRDATA: ");
-		for (i = 0; i < 80/4; i++) {
-			*((unsigned int *)(read_buffer + mtd->oobsize) + i) = readl(NFC_REG_USER_DATA(i));
-			printk("%02x %02x %02x %02x ", 
-				   read_buffer[mtd->oobsize + i*4], 
-				   read_buffer[mtd->oobsize + i*4 + 1], 
-				   read_buffer[mtd->oobsize + i*4 + 2], 
-				   read_buffer[mtd->oobsize + i*4 + 3]);
-		}
-		printk("\n");
-		*/
-		if (check_ecc(sector_count))
-			ERR_INFO("ECC check fail\n");
+		for (i = 0; i < sector_count; i++)
+			*((unsigned int *)(read_buffer + mtd->writesize) + i) = readl(NFC_REG_USER_DATA(i));
 		break;
 	}
 
@@ -627,6 +616,12 @@ static int nfc_ecc_calculate(struct mtd_info *mtd, const uint8_t *dat, uint8_t *
 
 static int nfc_ecc_correct(struct mtd_info *mtd, uint8_t *dat, uint8_t *read_ecc, uint8_t *calc_ecc)
 {
+	/*
+	if (check_ecc(mtd->writesize / 1024)) {
+		ERR_INFO("ECC check fail\n");
+		return -1;
+	}
+	*/
 	return 0;
 }
 
@@ -872,7 +867,7 @@ int nfc_second_init(struct mtd_info *mtd)
 	sunxi_ecclayout.oobfree->offset = n;
 	sunxi_ecclayout.oobfree->length = 0;
 	nand->ecc.layout = &sunxi_ecclayout;
-	nand->ecc.size = 1024;
+	nand->ecc.size = mtd->writesize;
 	nand->ecc.bytes = 56;
 
 	// setup DMA
@@ -912,7 +907,7 @@ int nfc_second_init(struct mtd_info *mtd)
 	}
 
 	// test command
-	//test_nfc(mtd);
+	test_nfc(mtd);
 	//test_ops(mtd);
 
 	return 0;
