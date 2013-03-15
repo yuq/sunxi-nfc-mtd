@@ -678,6 +678,7 @@ int nfc_first_init(struct mtd_info *mtd)
 	nand->read_buf = nfc_read_buf;
 	nand->write_buf = nfc_write_buf;
 	nand->waitfunc = nfc_wait;
+	nand->bbt_options = NAND_BBT_USE_FLASH;
 	return 0;
 }
 
