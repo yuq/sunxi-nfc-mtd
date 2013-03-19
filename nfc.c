@@ -634,12 +634,10 @@ static int nfc_ecc_calculate(struct mtd_info *mtd, const uint8_t *dat, uint8_t *
 
 static int nfc_ecc_correct(struct mtd_info *mtd, uint8_t *dat, uint8_t *read_ecc, uint8_t *calc_ecc)
 {
-	/*
 	if (check_ecc(mtd->writesize / 1024)) {
 		ERR_INFO("ECC check fail\n");
 		return -1;
 	}
-	*/
 	return 0;
 }
 
