@@ -18,6 +18,7 @@
  */
 
 #include <linux/io.h>
+#include <linux/module.h>
 #include <linux/string.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
@@ -48,6 +49,14 @@ static int dma_hdle;
 static struct nand_ecclayout sunxi_ecclayout;
 static DECLARE_WAIT_QUEUE_HEAD(nand_rb_wait);
 static int program_column = -1, program_page = -1;
+
+unsigned int hwecc_switch = 1;
+module_param(hwecc_switch, uint, 0);
+MODULE_PARM_DESC(hwecc_switch, "hardware ECC switch, 1=on, 0=off");
+
+unsigned int use_flash_bbt = 1;
+module_param(use_flash_bbt, uint, 0);
+MODULE_PARM_DESC(use_flash_bbt, "use flash bad block table, 1=use, 0=not");
 
 //////////////////////////////////////////////////////////////////
 // SUNXI platform
@@ -494,7 +503,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		writel(sector_count, NFC_REG_SECTOR_NUM);
 
 	// enable ecc
-	if (do_enable_ecc)
+	if (hwecc_switch && do_enable_ecc)
 		enable_ecc(1);
 
 	// send command
@@ -531,7 +540,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		break;
 	}
 
-	if (do_enable_ecc)
+	if (hwecc_switch && do_enable_ecc)
 		disable_ecc();
 
 	//DBG_INFO("done\n");
@@ -634,6 +643,9 @@ static int nfc_ecc_calculate(struct mtd_info *mtd, const uint8_t *dat, uint8_t *
 
 static int nfc_ecc_correct(struct mtd_info *mtd, uint8_t *dat, uint8_t *read_ecc, uint8_t *calc_ecc)
 {
+	if (!hwecc_switch)
+		return 0;
+
 	if (check_ecc(mtd->writesize / 1024)) {
 		ERR_INFO("ECC check fail\n");
 		return -1;
@@ -660,6 +672,20 @@ int nfc_first_init(struct mtd_info *mtd)
 {
 	uint32_t ctl;
 	struct nand_chip *nand = mtd->priv;
+
+	if (hwecc_switch) {
+		DBG_INFO("hardware ECC is on\n");
+	}
+	else {
+		DBG_INFO("hardware ECC is off\n");
+	}
+
+	if (use_flash_bbt) {
+		DBG_INFO("use flash bad block table\n");
+	}
+	else {
+		DBG_INFO("not use flash bad block table\n");
+	}
 
 	// set NFC clock source
 	sunxi_set_nand_clock(20);
@@ -695,7 +721,8 @@ int nfc_first_init(struct mtd_info *mtd)
 	nand->read_buf = nfc_read_buf;
 	nand->write_buf = nfc_write_buf;
 	nand->waitfunc = nfc_wait;
-	nand->bbt_options = NAND_BBT_USE_FLASH;
+	if (use_flash_bbt)
+		nand->bbt_options = NAND_BBT_USE_FLASH;
 	return 0;
 }
 
@@ -934,6 +961,7 @@ int nfc_second_init(struct mtd_info *mtd)
 	// test command
 	//test_nfc(mtd);
 	//test_ops(mtd);
+	//print_page(mtd, 0);
 
 	return 0;
 
