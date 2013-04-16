@@ -29,6 +29,7 @@
 #include "nfc.h"
 
 MODULE_LICENSE("GPL");
+MODULE_AUTHOR("yuq");
 
 #define	DRIVER_NAME	"mtd-nand-sunxi"
 
@@ -145,6 +146,9 @@ static struct platform_device plat_device = {
 	},
 };
 
+int nand1k_init(void);
+void nand1k_exit(void);
+
 static int __init nand_init(void)
 {
 	int err;
@@ -173,6 +177,10 @@ static int __init nand_init(void)
 	}
 	DBG_INFO("nand device, ok.\n");
 
+	if (nand1k_init()) {
+		ERR_INFO("nand1k module init fail\n");
+	}
+
 	return 0;
 }
 
@@ -188,11 +196,10 @@ static void __exit nand_exit(void)
         return;
     }
 
-	DBG_INFO("nand device : bye bye\n");
+	nand1k_exit();
 	platform_device_unregister(&plat_device);
-
-	DBG_INFO("nand driver : bye bye\n");
 	platform_driver_unregister(&plat_driver);
+	DBG_INFO("nand driver : bye bye\n");
 }
 
 module_init(nand_init);

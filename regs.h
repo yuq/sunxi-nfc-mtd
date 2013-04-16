@@ -148,7 +148,7 @@
 #define NFC_RANDOM_DIRECTION    (1 << 10 )
 #define NFC_ECC_MODE_SHIFT      12
 #define NFC_ECC_MODE			(0xf << NFC_ECC_MODE_SHIFT)
-#define NFC_RANDOM_SEED         (0x7fff << 16))
+#define NFC_RANDOM_SEED         (0x7fff << 16)
 
 #define NFC_IRQ_MAJOR		    13
 /*cmd flag bit*/

@@ -235,6 +235,9 @@ static void enable_random(void)
 	uint32_t ctl;
 	ctl = readl(NFC_REG_ECC_CTL);
 	ctl |= NFC_RANDOM_EN;
+	ctl &= ~NFC_RANDOM_DIRECTION;
+	ctl &= ~NFC_RANDOM_SEED;
+	ctl |= (0x4a80 << 16);
 	writel(ctl, NFC_REG_ECC_CTL);
 }
 
@@ -264,6 +267,15 @@ static void enable_ecc(int pipline)
 
 	cfg |= NFC_ECC_EN;
 	writel(cfg, NFC_REG_ECC_CTL);
+}
+
+static void set_ecc_mode(int mode)
+{
+	uint32_t ctl;
+	ctl = readl(NFC_REG_ECC_CTL);
+	ctl &= ~NFC_ECC_MODE;
+	ctl |= mode << NFC_ECC_MODE_SHIFT;
+	writel(ctl, NFC_REG_ECC_CTL);
 }
 
 int check_ecc(int eblock_cnt)
@@ -653,6 +665,63 @@ static int nfc_ecc_correct(struct mtd_info *mtd, uint8_t *dat, uint8_t *read_ecc
 	return 0;
 }
 
+struct save_1k_mode {
+	uint32_t ecc_ctl;
+	uint32_t spare_area;
+};
+
+static void enter_1k_mode(struct save_1k_mode *save)
+{
+	uint32_t ctl;
+	ctl = readl(NFC_REG_ECC_CTL);
+	save->ecc_ctl = ctl;
+	ctl = readl(NFC_REG_SPARE_AREA);
+	save->spare_area = ctl;
+	set_ecc_mode(8);
+	writel(1024, NFC_REG_SPARE_AREA);
+}
+
+static void exit_1k_mode(struct save_1k_mode *save)
+{
+	writel(save->ecc_ctl, NFC_REG_ECC_CTL);
+	writel(save->spare_area, NFC_REG_SPARE_AREA);
+}
+
+void nfc_read_page1k(uint32_t page_addr, void *buff)
+{
+	struct save_1k_mode save;
+	uint32_t cfg = NAND_CMD_READ0 | NFC_SEQ | NFC_SEND_CMD1 | NFC_DATA_TRANS | NFC_SEND_ADR | 
+		NFC_SEND_CMD2 | ((5 - 1) << 16) | NFC_WAIT_FLAG | (0 << 30);
+
+	wait_cmdfifo_free();
+
+	enter_1k_mode(&save);
+
+	writel(readl(NFC_REG_CTL) & ~NFC_RAM_METHOD, NFC_REG_CTL);
+	writel(page_addr << 16, NFC_REG_ADDR_LOW);
+	writel(page_addr >> 16, NFC_REG_ADDR_HIGH);
+	writel(1024, NFC_REG_CNT);
+	writel(1, NFC_REG_SECTOR_NUM);
+	writel(NAND_CMD_READSTART, NFC_REG_RCMD_SET);
+
+	enable_random();
+	enable_ecc(1);
+
+	writel(cfg, NFC_REG_CMD);
+
+	wait_cmdfifo_free();
+	wait_cmd_finish();
+
+	disable_ecc();
+	disable_random();
+
+	check_ecc(1);
+
+	memcpy(buff, (void *)NFC_RAM0_BASE, 1024);
+
+	exit_1k_mode(&save);
+}
+
 static void first_test_nfc(struct mtd_info *mtd)
 {
 	nfc_cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
@@ -879,11 +948,7 @@ int nfc_second_init(struct mtd_info *mtd)
 	writel(readl(NFC_REG_ST), NFC_REG_ST);
 
 	// set ECC mode
-	ctl = readl(NFC_REG_ECC_CTL);
-	ctl &= ~NFC_ECC_MODE;
-	ctl &= ~NFC_ECC_MODE;
-	ctl |= chip_param->ecc_mode << NFC_ECC_MODE_SHIFT;
-	writel(ctl, NFC_REG_ECC_CTL);
+	set_ecc_mode(chip_param->ecc_mode);
 
 	// enable NFC
 	ctl = NFC_EN;
