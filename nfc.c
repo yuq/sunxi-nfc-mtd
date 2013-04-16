@@ -58,6 +58,10 @@ unsigned int use_flash_bbt = 1;
 module_param(use_flash_bbt, uint, 0);
 MODULE_PARM_DESC(use_flash_bbt, "use flash bad block table, 1=use, 0=not");
 
+unsigned int random_seed = 0x4a80;
+module_param(random_seed, uint, 0);
+MODULE_PARM_DESC(random_seed, "random seed used");
+
 //////////////////////////////////////////////////////////////////
 // SUNXI platform
 //
@@ -237,7 +241,7 @@ static void enable_random(void)
 	ctl |= NFC_RANDOM_EN;
 	ctl &= ~NFC_RANDOM_DIRECTION;
 	ctl &= ~NFC_RANDOM_SEED;
-	ctl |= (0x4a80 << 16);
+	ctl |= (random_seed << 16);
 	writel(ctl, NFC_REG_ECC_CTL);
 }
 
@@ -666,6 +670,7 @@ static int nfc_ecc_correct(struct mtd_info *mtd, uint8_t *dat, uint8_t *read_ecc
 }
 
 struct save_1k_mode {
+	uint32_t ctl;
 	uint32_t ecc_ctl;
 	uint32_t spare_area;
 };
@@ -673,16 +678,24 @@ struct save_1k_mode {
 static void enter_1k_mode(struct save_1k_mode *save)
 {
 	uint32_t ctl;
+
+	ctl = readl(NFC_REG_CTL);
+	save->ctl = ctl;
+	ctl &= ~NFC_PAGE_SIZE;
+	writel(ctl, NFC_REG_CTL);
+	
 	ctl = readl(NFC_REG_ECC_CTL);
 	save->ecc_ctl = ctl;
+	set_ecc_mode(8);
+
 	ctl = readl(NFC_REG_SPARE_AREA);
 	save->spare_area = ctl;
-	set_ecc_mode(8);
 	writel(1024, NFC_REG_SPARE_AREA);
 }
 
 static void exit_1k_mode(struct save_1k_mode *save)
 {
+	writel(save->ctl, NFC_REG_CTL);
 	writel(save->ecc_ctl, NFC_REG_ECC_CTL);
 	writel(save->spare_area, NFC_REG_SPARE_AREA);
 }
@@ -691,24 +704,27 @@ void nfc_read_page1k(uint32_t page_addr, void *buff)
 {
 	struct save_1k_mode save;
 	uint32_t cfg = NAND_CMD_READ0 | NFC_SEQ | NFC_SEND_CMD1 | NFC_DATA_TRANS | NFC_SEND_ADR | 
-		NFC_SEND_CMD2 | ((5 - 1) << 16) | NFC_WAIT_FLAG | (0 << 30);
+		NFC_SEND_CMD2 | ((5 - 1) << 16) | NFC_WAIT_FLAG | NFC_DATA_SWAP_METHOD | (2 << 30);
 
 	wait_cmdfifo_free();
 
 	enter_1k_mode(&save);
 
-	writel(readl(NFC_REG_CTL) & ~NFC_RAM_METHOD, NFC_REG_CTL);
+	writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
+	dma_nand_config_start(dma_hdle, 0, (uint32_t)buff, 1024);
+
 	writel(page_addr << 16, NFC_REG_ADDR_LOW);
 	writel(page_addr >> 16, NFC_REG_ADDR_HIGH);
 	writel(1024, NFC_REG_CNT);
+	writel(0x00e00530, NFC_REG_RCMD_SET);
 	writel(1, NFC_REG_SECTOR_NUM);
-	writel(NAND_CMD_READSTART, NFC_REG_RCMD_SET);
 
 	enable_random();
 	enable_ecc(1);
 
 	writel(cfg, NFC_REG_CMD);
 
+	dma_nand_wait_finish();
 	wait_cmdfifo_free();
 	wait_cmd_finish();
 
@@ -716,8 +732,6 @@ void nfc_read_page1k(uint32_t page_addr, void *buff)
 	disable_random();
 
 	check_ecc(1);
-
-	memcpy(buff, (void *)NFC_RAM0_BASE, 1024);
 
 	exit_1k_mode(&save);
 }
@@ -755,6 +769,8 @@ int nfc_first_init(struct mtd_info *mtd)
 	else {
 		DBG_INFO("not use flash bad block table\n");
 	}
+
+	DBG_INFO("random_seed = %x\n", random_seed);
 
 	// set NFC clock source
 	sunxi_set_nand_clock(20);
