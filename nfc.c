@@ -287,7 +287,7 @@ int check_ecc(int eblock_cnt)
 	int i;
     int ecc_mode;
 	int max_ecc_bit_cnt = 16;
-	int cfg;
+	int cfg, corrected = 0;
 
 	ecc_mode = (readl(NFC_REG_ECC_CTL) & NFC_ECC_MODE) >> NFC_ECC_MODE_SHIFT;
 	if(ecc_mode == 0)
@@ -322,15 +322,24 @@ int check_ecc(int eblock_cnt)
 	for (i = 0; i < eblock_cnt; i += 4) {
 		int j, n = (eblock_cnt - i) < 4 ? (eblock_cnt - i) : 4;
 		cfg = readl(NFC_REG_ECC_CNT0 + i);
+
 		for (j = 0; j < n; j++, cfg >>= 8) {
-			if ((cfg & 0xff) >= max_ecc_bit_cnt - 4) {
-				ERR_INFO("ECC limit %d/%d\n", (cfg & 0xff), max_ecc_bit_cnt);
+			int bits = cfg & 0xff;
+			
+			if (bits) {
+				DBG_INFO("ECC corrected %d bits\n", bits);
+			}
+
+			if (bits >= max_ecc_bit_cnt - 4) {
+				ERR_INFO("ECC limit %d/%d\n", bits, max_ecc_bit_cnt);
 				//return -1;
 			}
+
+			corrected += bits;
 		}
 	}
 
-	return 0;
+	return corrected;
 }
 
 static void disable_ecc(void)
@@ -662,11 +671,7 @@ static int nfc_ecc_correct(struct mtd_info *mtd, uint8_t *dat, uint8_t *read_ecc
 	if (!hwecc_switch)
 		return 0;
 
-	if (check_ecc(mtd->writesize / 1024)) {
-		ERR_INFO("ECC check fail\n");
-		return -1;
-	}
-	return 0;
+	return check_ecc(mtd->writesize / 1024);
 }
 
 struct save_1k_mode {
@@ -720,7 +725,8 @@ void nfc_read_page1k(uint32_t page_addr, void *buff)
 	writel(1, NFC_REG_SECTOR_NUM);
 
 	enable_random();
-	enable_ecc(1);
+	if (hwecc_switch)
+		enable_ecc(1);
 
 	writel(cfg, NFC_REG_CMD);
 
@@ -728,10 +734,11 @@ void nfc_read_page1k(uint32_t page_addr, void *buff)
 	wait_cmdfifo_free();
 	wait_cmd_finish();
 
-	disable_ecc();
+	if (hwecc_switch) {
+		disable_ecc();
+		check_ecc(1);
+	}
 	disable_random();
-
-	check_ecc(1);
 
 	exit_1k_mode(&save);
 }

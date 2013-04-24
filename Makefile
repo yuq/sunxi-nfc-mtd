@@ -1,6 +1,6 @@
 #!makefile
 
-KERNEL_DIR ?= /home/yuq/code/linux-a10
+KERNEL_DIR ?= ../linux-a10
 
 .PHONY : all clean
 all:
