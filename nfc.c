@@ -926,7 +926,7 @@ int nfc_second_init(struct mtd_info *mtd)
 	int i, err, j;
 	uint32_t ctl;
 	uint8_t id[8];
-	struct nand_chip_param *chip_param = NULL;
+	struct nand_chip_param *nand_chip_param, *chip_param = NULL;
 	struct nand_chip *nand = mtd->priv;
 
 	// get nand chip id
@@ -938,6 +938,7 @@ int nfc_second_init(struct mtd_info *mtd)
 			 id[4], id[5], id[6], id[7]);
 
 	// find chip
+	nand_chip_param = sunxi_get_nand_chip_param(id[0]);
 	for (i = 0; nand_chip_param[i].id_len; i++) {
 		int find = 1;
 		for (j = 0; j < nand_chip_param[i].id_len; j++) {

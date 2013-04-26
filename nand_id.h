@@ -27,6 +27,6 @@ struct nand_chip_param {
 	int ecc_mode;   //the Ecc Mode for the nand flash chip, 0: bch-16, 1:bch-28, 2:bch_32
 };
 
-extern struct nand_chip_param nand_chip_param[];
+struct nand_chip_param *sunxi_get_nand_chip_param(unsigned char mf);
 
 #endif
