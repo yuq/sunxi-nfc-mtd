@@ -325,17 +325,10 @@ int check_ecc(int eblock_cnt)
 
 		for (j = 0; j < n; j++, cfg >>= 8) {
 			int bits = cfg & 0xff;
-			
-			if (bits) {
-				DBG_INFO("ECC corrected %d bits\n", bits);
-			}
-
 			if (bits >= max_ecc_bit_cnt - 4) {
-				ERR_INFO("ECC limit %d/%d\n", bits, max_ecc_bit_cnt);
-				//return -1;
+				DBG_INFO("ECC limit %d/%d\n", bits, max_ecc_bit_cnt);
+				corrected++;
 			}
-
-			corrected += bits;
 		}
 	}
 
