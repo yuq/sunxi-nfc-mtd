@@ -57,6 +57,13 @@ static int nand1k_read(struct file *filp, char __user *buff, size_t count, loff_
 
 	printk(KERN_INFO "nand1k read off=%llx count=%x\n", offs, count);
 
+	if (offs > 128 * 1024 || offs < 0 || 
+		count < 0 || count > 128 * 1024 || 
+		offs + count > 128 * 1024) {
+		printk(KERN_ERR "nand1k is restricted to access the first 128 1K pages\n");
+		return -EINVAL;
+	}
+
 	while (size < count) {
 		page = offs / 1024;
 		offset = offs % 1024;
@@ -88,8 +95,15 @@ static int nand1k_write(struct file *filp, const char __user *buff, size_t count
 
 	printk(KERN_INFO "nand1k write off=%llx count=%x\n", offs, count);
 
+	if (offs > 128 * 1024 || offs < 0 || 
+		count < 0 || count > 128 * 1024 || 
+		offs + count > 128 * 1024) {
+		printk(KERN_ERR "nand1k is restricted to access the first 128 1K pages\n");
+		return -EINVAL;
+	}
+
 	if ((offs & (1024 - 1)) || (count & (1024 - 1))) {
-		printk(KERN_ERR "nand1k write non-1K-aligned data\n");
+		printk(KERN_ERR "nand1k can't write non-1K-aligned data\n");
 		return -EINVAL;
 	}
 
