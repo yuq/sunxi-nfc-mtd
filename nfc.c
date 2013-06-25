@@ -621,9 +621,8 @@ static irqreturn_t nfc_interrupt_handler(int irq, void *dev_id)
 
 static int get_chip_status(struct mtd_info *mtd)
 {
-	struct nand_chip *nand = mtd->priv;
-	nand->cmdfunc(mtd, NAND_CMD_STATUS, -1, -1);
-	return nand->read_byte(mtd);
+	nfc_cmdfunc(mtd, NAND_CMD_STATUS, -1, -1);
+	return nfc_read_byte(mtd);
 }
 
 // For erase and program command to wait for chip ready
@@ -666,6 +665,9 @@ static int nfc_ecc_correct(struct mtd_info *mtd, uint8_t *dat, uint8_t *read_ecc
 
 	return check_ecc(mtd->writesize / 1024);
 }
+
+//////////////////////////////////////////////////////////////////////////////////
+// 1K mode for SPL read/write
 
 struct save_1k_mode {
 	uint32_t ctl;
@@ -739,6 +741,50 @@ void nfc_read_page1k(uint32_t page_addr, void *buff)
 
 	nfc_select_chip(NULL, -1);
 }
+
+void nfc_write_page1k(uint32_t page_addr, void *buff)
+{
+	struct save_1k_mode save;
+	uint32_t cfg = NAND_CMD_SEQIN | NFC_SEQ | NFC_SEND_CMD1 | NFC_DATA_TRANS | NFC_SEND_ADR | 
+		NFC_SEND_CMD2 | ((5 - 1) << 16) | NFC_WAIT_FLAG | NFC_DATA_SWAP_METHOD | NFC_ACCESS_DIR | 
+		(2 << 30);
+
+	nfc_select_chip(NULL, 0);
+
+	wait_cmdfifo_free();
+
+	enter_1k_mode(&save);
+
+	writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
+	dma_nand_config_start(dma_hdle, 1, (uint32_t)buff, 1024);
+
+	writel(page_addr << 16, NFC_REG_ADDR_LOW);
+	writel(page_addr >> 16, NFC_REG_ADDR_HIGH);
+	writel(1024, NFC_REG_CNT);
+	writel(0x00008510, NFC_REG_WCMD_SET);
+	writel(1, NFC_REG_SECTOR_NUM);
+
+	enable_random();
+	if (hwecc_switch)
+		enable_ecc(1);
+
+	writel(cfg, NFC_REG_CMD);
+
+	dma_nand_wait_finish();
+	wait_cmdfifo_free();
+	wait_cmd_finish();
+
+	if (hwecc_switch)
+		disable_ecc();
+
+	disable_random();
+
+	exit_1k_mode(&save);
+
+	nfc_select_chip(NULL, -1);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////
 
 static void first_test_nfc(struct mtd_info *mtd)
 {

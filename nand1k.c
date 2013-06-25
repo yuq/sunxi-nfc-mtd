@@ -37,7 +37,7 @@
 
 static struct class *dev_class;
 static int nand1k_major;
-static char *read_buff;
+static char *rw_buff;
 
 static int nand1k_open(struct inode *inode, struct file *file)
 {
@@ -54,32 +54,59 @@ static int nand1k_read(struct file *filp, char __user *buff, size_t count, loff_
 	loff_t offs = *f_pos;
 	uint32_t len, ret, page, offset;
 	size_t size = 0;
+
 	printk(KERN_INFO "nand1k read off=%llx count=%x\n", offs, count);
+
 	while (size < count) {
 		page = offs / 1024;
 		offset = offs % 1024;
 		len = 1024 - offset;
 		if (len > count - size)
 			len = count - size;
-		nfc_read_page1k(page, read_buff);
-		ret = copy_to_user(buff, read_buff + offset, len);
+		nfc_read_page1k(page, rw_buff);
+		ret = copy_to_user(buff, rw_buff + offset, len);
 		printk(KERN_INFO "nand1k read page=%x offset=%x len=%x\n", page, offset, len);
 		printk(KERN_INFO "nand1k %x %x %x %x %x %x %x %x\n", 
-			   read_buff[0], read_buff[1], read_buff[2], read_buff[3],
-			   read_buff[4], read_buff[5], read_buff[6], read_buff[7]);
+			   rw_buff[0], rw_buff[1], rw_buff[2], rw_buff[3],
+			   rw_buff[4], rw_buff[5], rw_buff[6], rw_buff[7]);
 		size += len - ret;
 		offs += len - ret;
 		buff += len - ret;
 		if (ret)
 			break;
 	}
+
 	*f_pos += size;
     return size;
 }
 
 static int nand1k_write(struct file *filp, const char __user *buff, size_t count, loff_t *f_pos)
 {
-    return 0;
+	loff_t offs = *f_pos;
+	uint32_t ret;
+	size_t size = 0;
+
+	printk(KERN_INFO "nand1k write off=%llx count=%x\n", offs, count);
+
+	if ((offs & (1024 - 1)) || (count & (1024 - 1))) {
+		printk(KERN_ERR "nand1k write non-1K-aligned data\n");
+		return -EINVAL;
+	}
+
+	while (size < count) {
+		ret = copy_from_user(rw_buff, buff, 1024);
+		if (ret)
+			break;
+
+		nfc_write_page1k(offs / 1024, rw_buff);
+		
+		size += 1024;
+		offs += 1024;
+		buff += 1024;
+	}
+
+	*f_pos += size;
+    return size;
 }
 
 static long nand1k_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
@@ -105,8 +132,8 @@ int nand1k_init(void)
 	int err;
 	struct device *dev;
 
-	read_buff = kmalloc(1024, GFP_KERNEL);
-	if (!read_buff) {
+	rw_buff = kmalloc(1024, GFP_KERNEL);
+	if (!rw_buff) {
 		printk(KERN_ERR "allocate read buffer fail\n");
 		err = -ENOMEM;
 		goto error0;
@@ -141,7 +168,7 @@ error3:
 error2:
 	class_destroy(dev_class);
 error1:
-	kfree(read_buff);
+	kfree(rw_buff);
 error0:
 	return err;
 }
@@ -151,7 +178,7 @@ void nand1k_exit(void)
 	device_destroy(dev_class, MKDEV(nand1k_major, 0));
     unregister_chrdev(nand1k_major, CHAR_DEV_NAME);
 	class_destroy(dev_class);
-	kfree(read_buff);
+	kfree(rw_buff);
 }
 
 
