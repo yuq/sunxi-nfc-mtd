@@ -704,6 +704,8 @@ void nfc_read_page1k(uint32_t page_addr, void *buff)
 	uint32_t cfg = NAND_CMD_READ0 | NFC_SEQ | NFC_SEND_CMD1 | NFC_DATA_TRANS | NFC_SEND_ADR | 
 		NFC_SEND_CMD2 | ((5 - 1) << 16) | NFC_WAIT_FLAG | NFC_DATA_SWAP_METHOD | (2 << 30);
 
+	nfc_select_chip(NULL, 0);
+
 	wait_cmdfifo_free();
 
 	enter_1k_mode(&save);
@@ -734,6 +736,8 @@ void nfc_read_page1k(uint32_t page_addr, void *buff)
 	disable_random();
 
 	exit_1k_mode(&save);
+
+	nfc_select_chip(NULL, -1);
 }
 
 static void first_test_nfc(struct mtd_info *mtd)
