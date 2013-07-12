@@ -857,7 +857,7 @@ int nfc_first_init(struct mtd_info *mtd)
 	nand->write_buf = nfc_write_buf;
 	nand->waitfunc = nfc_wait;
 	if (use_flash_bbt)
-		nand->bbt_options = NAND_BBT_USE_FLASH;
+		nand->bbt_options = NAND_BBT_USE_FLASH | NAND_BBT_NO_OOB;
 	return 0;
 }
 
