@@ -58,9 +58,9 @@ unsigned int use_flash_bbt = 1;
 module_param(use_flash_bbt, uint, 0);
 MODULE_PARM_DESC(use_flash_bbt, "use flash bad block table, 1=use, 0=not");
 
-unsigned int random_seed = 0x4a80;
-module_param(random_seed, uint, 0);
-MODULE_PARM_DESC(random_seed, "random seed used");
+unsigned int random_switch = 1;
+module_param(random_switch, uint, 0);
+MODULE_PARM_DESC(random_switch, "random read/write switch, 1=on, 0=off");
 
 //////////////////////////////////////////////////////////////////
 // SUNXI platform
@@ -234,14 +234,42 @@ static inline int check_rb_ready(int rb)
 	return (readl(NFC_REG_ST) & (NFC_RB_STATE0 << (rb & 0x3))) ? 1 : 0;
 }
 
-static void enable_random(void)
+static void nand1k_enable_random(void)
 {
 	uint32_t ctl;
 	ctl = readl(NFC_REG_ECC_CTL);
 	ctl |= NFC_RANDOM_EN;
 	ctl &= ~NFC_RANDOM_DIRECTION;
 	ctl &= ~NFC_RANDOM_SEED;
-	ctl |= (random_seed << 16);
+	ctl |= (0x4a80 << 16);
+	writel(ctl, NFC_REG_ECC_CTL);
+}
+
+static void enable_random(uint32_t page)
+{
+	static const uint16_t random_seed[128] = {
+		//0        1      2       3        4      5        6       7       8       9
+		0x2b75, 0x0bd0, 0x5ca3, 0x62d1, 0x1c93, 0x07e9, 0x2162, 0x3a72, 0x0d67, 0x67f9,
+		0x1be7, 0x077d, 0x032f, 0x0dac, 0x2716, 0x2436, 0x7922, 0x1510, 0x3860, 0x5287,
+		0x480f, 0x4252, 0x1789, 0x5a2d, 0x2a49, 0x5e10, 0x437f, 0x4b4e, 0x2f45, 0x216e,
+		0x5cb7, 0x7130, 0x2a3f, 0x60e4, 0x4dc9, 0x0ef0, 0x0f52, 0x1bb9, 0x6211, 0x7a56,
+		0x226d, 0x4ea7, 0x6f36, 0x3692, 0x38bf, 0x0c62, 0x05eb, 0x4c55, 0x60f4, 0x728c,
+		0x3b6f, 0x2037, 0x7f69, 0x0936, 0x651a, 0x4ceb, 0x6218, 0x79f3, 0x383f, 0x18d9,
+		0x4f05, 0x5c82, 0x2912, 0x6f17, 0x6856, 0x5938, 0x1007, 0x61ab, 0x3e7f, 0x57c2,
+		0x542f, 0x4f62, 0x7454, 0x2eac, 0x7739, 0x42d4, 0x2f90, 0x435a, 0x2e52, 0x2064,
+		0x637c, 0x66ad, 0x2c90, 0x0bad, 0x759c, 0x0029, 0x0986, 0x7126, 0x1ca7, 0x1605,
+		0x386a, 0x27f5, 0x1380, 0x6d75, 0x24c3, 0x0f8e, 0x2b7a, 0x1418, 0x1fd1, 0x7dc1,
+		0x2d8e, 0x43af, 0x2267, 0x7da3, 0x4e3d, 0x1338, 0x50db, 0x454d, 0x764d, 0x40a3,
+		0x42e6, 0x262b, 0x2d2e, 0x1aea, 0x2e17, 0x173d, 0x3a6e, 0x71bf, 0x25f9, 0x0a5d,
+		0x7c57, 0x0fbe, 0x46ce, 0x4939, 0x6b17, 0x37bb, 0x3e91, 0x76db
+	};
+
+	uint32_t ctl;
+	ctl = readl(NFC_REG_ECC_CTL);
+	ctl |= NFC_RANDOM_EN;
+	ctl &= ~NFC_RANDOM_DIRECTION;
+	ctl &= ~NFC_RANDOM_SEED;
+	ctl |= ((uint32_t)random_seed[page % 128] << 16);
 	writel(ctl, NFC_REG_ECC_CTL);
 }
 
@@ -361,7 +389,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 {
 	int i;
 	uint32_t cfg = command;
-	int read_size, write_size, do_enable_ecc = 0;
+	int read_size, write_size, do_enable_ecc = 0, do_enable_random = 0;
 	int addr_cycle, wait_rb_flag, byte_count, sector_count;
 	addr_cycle = wait_rb_flag = byte_count = sector_count = 0;
 
@@ -408,6 +436,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 			do_enable_ecc = 1;
 			//DBG_INFO("cmdfunc read %d %d\n", column, page_addr);
 		}
+		do_enable_random = 1;
 			
 		//access NFC internal RAM by DMA bus
 		writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
@@ -461,6 +490,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 			ERR_INFO("program unsupported column %d %d\n", column, page_addr);
 			return;
 		}
+		do_enable_random = 1;
 
 		//access NFC internal RAM by DMA bus
 		writel(readl(NFC_REG_CTL) | NFC_RAM_METHOD, NFC_REG_CTL);
@@ -520,6 +550,10 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 	if (sector_count)
 		writel(sector_count, NFC_REG_SECTOR_NUM);
 
+	// enable random
+	if (random_switch && do_enable_random)
+		enable_random(page_addr);
+
 	// enable ecc
 	if (hwecc_switch && do_enable_ecc)
 		enable_ecc(1);
@@ -558,8 +592,13 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		break;
 	}
 
+	// disable ecc
 	if (hwecc_switch && do_enable_ecc)
 		disable_ecc();
+
+	// disable random
+	if (random_switch && do_enable_random)
+		disable_random();
 
 	//DBG_INFO("done\n");
 
@@ -721,7 +760,7 @@ void nfc_read_page1k(uint32_t page_addr, void *buff)
 	writel(0x00e00530, NFC_REG_RCMD_SET);
 	writel(1, NFC_REG_SECTOR_NUM);
 
-	enable_random();
+	nand1k_enable_random();
 	if (hwecc_switch)
 		enable_ecc(1);
 
@@ -764,7 +803,7 @@ void nfc_write_page1k(uint32_t page_addr, void *buff)
 	writel(0x00008510, NFC_REG_WCMD_SET);
 	writel(1, NFC_REG_SECTOR_NUM);
 
-	enable_random();
+	nand1k_enable_random();
 	if (hwecc_switch)
 		enable_ecc(1);
 
@@ -820,7 +859,12 @@ int nfc_first_init(struct mtd_info *mtd)
 		DBG_INFO("not use flash bad block table\n");
 	}
 
-	DBG_INFO("random_seed = %x\n", random_seed);
+	if (random_switch) {
+		DBG_INFO("random read/write is on\n");
+	}
+	else {
+		DBG_INFO("random read/write is off\n");
+	}
 
 	// set NFC clock source
 	sunxi_set_nand_clock(20);
