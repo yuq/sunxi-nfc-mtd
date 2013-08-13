@@ -59,7 +59,7 @@ unsigned int use_flash_bbt = 1;
 module_param(use_flash_bbt, uint, 0);
 MODULE_PARM_DESC(use_flash_bbt, "use flash bad block table, 1=use, 0=not");
 
-unsigned int random_switch = 1;
+unsigned int random_switch = 0;
 module_param(random_switch, uint, 0);
 MODULE_PARM_DESC(random_switch, "random read/write switch, 1=on, 0=off");
 
