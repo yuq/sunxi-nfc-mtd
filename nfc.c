@@ -49,6 +49,7 @@ static int dma_hdle;
 static struct nand_ecclayout sunxi_ecclayout;
 static DECLARE_WAIT_QUEUE_HEAD(nand_rb_wait);
 static int program_column = -1, program_page = -1;
+static int sunxi_nand_read_page_addr = 0;
 
 unsigned int hwecc_switch = 1;
 module_param(hwecc_switch, uint, 0);
@@ -341,7 +342,7 @@ int check_ecc(int eblock_cnt)
 	cfg = readl(NFC_REG_ECC_ST) & 0xffff;
 	for (i = 0; i < eblock_cnt; i++) {
 		if (cfg & (1<<i)) {
-			ERR_INFO("ECC too many error at %d\n", i);
+			ERR_INFO("ECC too many error at %x:%d\n", sunxi_nand_read_page_addr, i);
 			return -1;
 		}
 	}
@@ -353,8 +354,15 @@ int check_ecc(int eblock_cnt)
 
 		for (j = 0; j < n; j++, cfg >>= 8) {
 			int bits = cfg & 0xff;
+            /*
+			if (bits) {
+				DBG_INFO("ECC bitflip happen at %x:%d\n", sunxi_nand_read_page_addr, j);
+			}
+			*/
 			if (bits >= max_ecc_bit_cnt - 4) {
-				DBG_INFO("ECC limit %d/%d\n", bits, max_ecc_bit_cnt);
+				DBG_INFO("ECC limit %d/%d at %x:%d\n", 
+						 bits, max_ecc_bit_cnt, 
+						 sunxi_nand_read_page_addr, j);
 				corrected++;
 			}
 		}
@@ -434,6 +442,7 @@ static void nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 			sector_count = mtd->writesize / 1024;
 			read_size = mtd->writesize;
 			do_enable_ecc = 1;
+			sunxi_nand_read_page_addr = page_addr;
 			//DBG_INFO("cmdfunc read %d %d\n", column, page_addr);
 		}
 		do_enable_random = 1;
